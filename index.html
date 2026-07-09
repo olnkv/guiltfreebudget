@@ -226,7 +226,7 @@ let state = null; // {active, monthLabel, salaryCents, fixed[], budgets[], updat
 const ui = { armed:null, armedTimer:null, confirmNewMonth:false, showBreakdown:false,
              email:"", syncMsg:"", err:null };
 
-function blankState(){ return { active:false, updatedAt:Date.now() }; }
+function blankState(){ return { active:false, updatedAt:0 }; }
 
 function totals(st){
   const fixed = st.fixed.reduce((a,f)=>a+f.cents,0);
