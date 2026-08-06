@@ -228,7 +228,16 @@ const ui = { armed:null, armedTimer:null, confirmNewMonth:false, showBreakdown:f
 
 function blankState(){ return { active:false, updatedAt:0 }; }
 
+// Coerce state loaded from this device or from already-synced cloud state so
+// that anything constructed before Extra income existed still satisfies the new
+// math. Guilt-free stays derived; we only backfill the missing input array.
+function normalize(st){
+  if(st && st.active && !Array.isArray(st.extra)) st.extra = [];
+  return st;
+}
+
 function totals(st){
+  const extra = (st.extra||[]).reduce((a,e)=>a+e.cents,0);
   const fixed = st.fixed.reduce((a,f)=>a+f.cents,0);
   let reserved = 0; const per = {};
   for(const b of st.budgets){
@@ -237,7 +246,7 @@ function totals(st){
     per[b.id] = { spent, reserved:res, left:b.limitCents - spent };
     reserved += res;
   }
-  return { fixed, reserved, guilt: st.salaryCents - fixed - reserved, per };
+  return { extra, fixed, reserved, guilt: st.salaryCents + extra - fixed - reserved, per };
 }
 
 /* ---------- local persistence (device) ---------- */
@@ -283,7 +292,7 @@ async function pull(){
   if(error){ syncState = "error"; ui.syncMsg = error.message; }
   else{
     if(data && data.data && (!state || (data.data.updatedAt||0) > (state.updatedAt||0))){
-      state = data.data; await saveLocal(state);
+      state = normalize(data.data); await saveLocal(state);
     }else if(state){ schedulePush(); }
     syncState = "ok"; ui.syncMsg = "";
   }
@@ -426,6 +435,14 @@ function budgetCard(b, t){
 
 function mainScreen(){
   const t = totals(state);
+  const extraRows = state.extra.map(x => `
+    <div class="item">
+      <span class="name">${esc(x.name)}</span>
+      <span class="row" style="gap:2px">
+        <span class="amount">+${fmt(x.cents)}</span>
+        <button class="x ${ui.armed==="extra:"+x.id?"armed":""}" data-act="del-extra" data-id="${x.id}" aria-label="Remove">×</button>
+      </span>
+    </div>`).join("");
   const fixedRows = state.fixed.map(f => `
     <div class="item">
       <span class="name">${esc(f.name)}</span>
@@ -457,6 +474,22 @@ function mainScreen(){
     ${confirmPanel}
     ${syncStrip()}
   </header>
+
+  <section>
+    <div class="sect-head">
+      <span class="eyebrow">Extra income</span>
+      <span class="sect-note">One-off money on top of your salary.</span>
+    </div>
+    <div class="card">
+      ${extraRows || `<div class="empty">Nothing yet — add a bonus, refund, gift…</div>`}
+      <div class="row" style="margin-top:12px">
+        <input id="ex-name" type="text" placeholder="Name (e.g. Q2 bonus)" data-enter="[data-act='add-extra']">
+        <input id="ex-amt" class="money" type="text" inputmode="decimal" placeholder="0,00" style="max-width:120px" data-enter="[data-act='add-extra']">
+        <button class="primary" data-act="add-extra">Add</button>
+      </div>
+      ${errFor("extra")}
+    </div>
+  </section>
 
   <section>
     <div class="sect-head">
@@ -497,6 +530,7 @@ function mainScreen(){
       ${ui.showBreakdown ? `
         <div class="breakdown">
           <div><span>Salary</span><span>${fmt(state.salaryCents)}</span></div>
+          <div><span>Extra income</span><span>+${fmt(t.extra)}</span></div>
           <div><span>Fixed expenses</span><span>−${fmt(t.fixed)}</span></div>
           <div><span>Set aside for budgets</span><span>−${fmt(t.reserved)}</span></div>
           <div style="margin-top:4px"><span><strong>Guilt-free</strong></span><span><strong>${fmt(t.guilt)}</strong></span></div>
@@ -566,7 +600,7 @@ document.addEventListener("click", async e=>{
     const c = parseMoney(document.getElementById("salary-in").value);
     if(!c) return fail("salary","Enter a valid amount, e.g. 1450,00");
     state = { active:true, monthLabel: currentMonthLabel(), salaryCents:c,
-              fixed:[], budgets:[], updatedAt:Date.now() };
+              extra:[], fixed:[], budgets:[], updatedAt:Date.now() };
     ui.confirmNewMonth = false; lastGuilt = null;
     await commit();
   }
@@ -574,6 +608,20 @@ document.addEventListener("click", async e=>{
   else if(act === "cancel-new-month"){ ui.confirmNewMonth = false; render(); }
   else if(act === "confirm-new-month"){
     state = blankState(); ui.confirmNewMonth = false; lastGuilt = null;
+    await commit();
+  }
+  else if(act === "add-extra"){
+    const name = document.getElementById("ex-name").value.trim();
+    const c = parseMoney(document.getElementById("ex-amt").value);
+    if(!name) return fail("extra","Give it a name.");
+    if(!c) return fail("extra","Amount looks off — try e.g. 250,00");
+    state.extra.push({id:uid(), name, cents:c});
+    document.getElementById("ex-name").value = ""; document.getElementById("ex-amt").value = "";
+    await commit();
+  }
+  else if(act === "del-extra"){
+    if(!arm("extra:"+btn.dataset.id)) return;
+    state.extra = state.extra.filter(x=>x.id!==btn.dataset.id);
     await commit();
   }
   else if(act === "add-fixed"){
@@ -651,7 +699,7 @@ document.addEventListener("keydown", e=>{
 
 /* ---------- boot ---------- */
 (async ()=>{
-  state = (await loadLocal()) || blankState();
+  state = normalize(await loadLocal()) || blankState();
   render();
   initSync();
 })();

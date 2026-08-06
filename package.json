@@ -1,0 +1,13 @@
+{
+  "name": "guiltfreebudget",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dev-only test harness for the single-file Guilt-Free Budget app. Not part of the shipped artifact.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "jsdom": "^24.0.0"
+  }
+}
